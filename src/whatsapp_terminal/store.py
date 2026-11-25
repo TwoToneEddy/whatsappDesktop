@@ -41,6 +41,10 @@ class Store:
                 body TEXT NOT NULL, timestamp REAL NOT NULL, PRIMARY KEY(chat, id)
             );
             CREATE INDEX IF NOT EXISTS timeline ON messages(chat, timestamp);
+            CREATE TABLE IF NOT EXISTS receipts (
+                chat TEXT NOT NULL, id TEXT NOT NULL, rank INTEGER NOT NULL,
+                timestamp REAL NOT NULL, PRIMARY KEY(chat, id)
+            );
         """)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(messages)")}
         if "from_me" not in columns:
@@ -177,6 +181,44 @@ class Store:
                 )
             )
 
+    def record_receipt(self, chat, message_ids, status, timestamp):
+        if status not in {"delivered", "read"} or not chat.endswith(("@lid", "@s.whatsapp.net")):
+            return []
+        rank = 2 if status == "read" else 1
+        changed = []
+        with self.lock, self.db:
+            chat = self.canonical(chat)
+            for message_id in dict.fromkeys(message_ids):
+                updated = self.db.execute(
+                    "INSERT INTO receipts VALUES (?, ?, ?, ?) ON CONFLICT(chat,id) "
+                    "DO UPDATE SET rank=excluded.rank, timestamp=excluded.timestamp "
+                    "WHERE excluded.rank > receipts.rank",
+                    (chat, message_id, rank, timestamp_seconds(timestamp)),
+                ).rowcount
+                message = self.db.execute(
+                    "SELECT timestamp FROM messages WHERE chat=? AND id=? AND from_me=1",
+                    (chat, message_id),
+                ).fetchone()
+                if updated and message:
+                    changed.append((message_id, message[0]))
+        return changed
+
+    def history_with_status(self, chat, limit=30):
+        with self.lock:
+            return list(
+                reversed(
+                    self.db.execute(
+                        "SELECT m.sender, m.body, m.timestamp, "
+                        "CASE WHEN m.from_me=1 AND m.chat NOT LIKE '%@g.us' THEN "
+                        "CASE r.rank WHEN 2 THEN 'read' WHEN 1 THEN 'delivered' "
+                        "ELSE 'status unknown' END ELSE '' END "
+                        "FROM messages m LEFT JOIN receipts r ON r.chat=m.chat AND r.id=m.id "
+                        "WHERE m.chat=? ORDER BY m.timestamp DESC, m.rowid DESC LIMIT ?",
+                        (self.canonical(chat), limit),
+                    ).fetchall()
+                )
+            )
+
     def save_contacts(self, contacts):
         with self.lock, self.db:
             self.db.executemany(
@@ -238,5 +280,12 @@ class Store:
                 "INSERT OR IGNORE INTO favorites SELECT ? FROM favorites WHERE jid=?", (lid, phone)
             )
             self.db.execute("DELETE FROM messages WHERE chat=?", (phone,))
+            self.db.execute(
+                "INSERT INTO receipts SELECT ?, id, rank, timestamp FROM receipts WHERE chat=? "
+                "ON CONFLICT(chat,id) DO UPDATE SET rank=excluded.rank, timestamp=excluded.timestamp "
+                "WHERE excluded.rank > receipts.rank",
+                (lid, phone),
+            )
+            self.db.execute("DELETE FROM receipts WHERE chat=?", (phone,))
             for table in ("contacts", "chats", "chat_activity", "favorites"):
                 self.db.execute(f"DELETE FROM {table} WHERE jid=?", (phone,))

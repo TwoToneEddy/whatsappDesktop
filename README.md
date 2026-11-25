@@ -241,6 +241,26 @@ WhatsApp membership and group permissions.
 
 ## Phone history sync
 
+### Delivery and read status
+
+For one-to-one chats, incoming delivery/read receipts are saved locally and
+matched to outgoing message IDs. The full-screen conversation shows colored
+**Delivered** and **Read** labels beneath messages and refreshes them automatically.
+Plain mode prints notices identifying the contact, message ID, and send time;
+`/history` includes `[delivered]` or `[read]`. Status survives restarts and does
+not regress when duplicate or out-of-order receipts arrive. Group receipts are
+ignored. This uses the backend's [receipt events](https://krypton-byte.my.id/neonize/dev/core-concepts/event-model/),
+not polling or an extra request for every message.
+
+**Status unknown** means no usable receipt has been recorded, not that a message
+is unread or undelivered. Privacy settings and receipt availability limit what
+can be shown. Existing history is not backfilled with read status; this feature
+records receipts received while the updated client is running. Opening a chat
+does not explicitly send a read receipt. “Sent.” still only confirms the backend
+send call succeeded, not delivery to the recipient.
+
+### Requesting older messages
+
 History batches supplied by WhatsApp are automatically imported into the local
 database, including chat names, group senders, timestamps, text, and media
 captions/placeholders. Duplicate batches and overlapping live messages are
@@ -341,8 +361,8 @@ access. Quit before removing local data. Message text is not stored in a separat
 shell command-history file.
 
 This first version handles live text messages and media captions/placeholders.
-It imports history supplied by your phone, but does not download attachments, make calls, display
-delivery receipts, or implement disappearing-message deletion. Messages received
+It imports history supplied by your phone, but does not download attachments, make calls, track
+group delivery/read receipts, or implement disappearing-message deletion. Messages received
 while running are retained locally until you remove the message database.
 
 Connectivity uses [Neonize](https://github.com/krypton-byte/neonize), an unofficial

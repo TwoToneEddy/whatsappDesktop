@@ -25,6 +25,7 @@ def backend(monkeypatch, tmp_path):
         "LoggedOutEv",
         "MessageEv",
         "OfflineSyncCompletedEv",
+        "ReceiptEv",
     ):
         setattr(events, name, type(name, (), {}))
 
@@ -178,3 +179,37 @@ def test_identity_refresh_uses_whatsapp_mapping_not_names(backend):
     instance.ready.set()
     instance.refresh_identities()
     assert instance.store.contacts() == [(lid, "Alice Smith")]
+
+
+def test_receipts_use_real_protobuf_and_ignore_self_and_groups(backend):
+    from neonize.proto.Neonize_pb2 import Receipt
+
+    instance, events, notices = backend
+    chat = "123@lid"
+    instance.store.add(chat, "one", "You", "Hello", 100, True)
+    handler = instance.client.handlers[events.ReceiptEv]
+    event = Receipt(Type=Receipt.DELIVERED, Timestamp=200, MessageIDs=["one"])
+    event.MessageSource.Chat.User = "123"
+    event.MessageSource.Chat.Server = "lid"
+    event.MessageSource.IsGroup = False
+    event.MessageSource.IsFromMe = False
+    handler(instance.client, event)
+    assert "received your message" in notices[-1]
+    assert instance.store.history_with_status(chat)[0][3] == "delivered"
+    for kind in (Receipt.READ_SELF, Receipt.SENDER, Receipt.PLAYED_SELF):
+        event.Type = kind
+        handler(instance.client, event)
+    assert len(notices) == 1
+    event.Type = Receipt.READ
+    event.MessageSource.IsGroup = True
+    handler(instance.client, event)
+    event.MessageSource.IsGroup = False
+    event.MessageSource.IsFromMe = True
+    handler(instance.client, event)
+    assert len(notices) == 1
+    event.MessageSource.IsFromMe = False
+    handler(instance.client, event)
+    assert "read your message" in notices[-1]
+    assert instance.store.history_with_status(chat)[0][3] == "read"
+    handler(instance.client, event)
+    assert len(notices) == 2

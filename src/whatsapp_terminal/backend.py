@@ -2,6 +2,7 @@ import threading
 import time
 
 from .history import import_batch, message_text
+from .timestamps import format_timestamp
 
 
 def chat_jid(chat):
@@ -23,6 +24,7 @@ class WhatsApp:
             LoggedOutEv,
             MessageEv,
             OfflineSyncCompletedEv,
+            ReceiptEv,
         )
 
         self.store = store
@@ -30,6 +32,28 @@ class WhatsApp:
         self.ready = threading.Event()
         self.connection_error = None
         self.client = NewClient(str(data_dir / "session.db"))
+
+        @self.client.event(ReceiptEv)
+        def receipt(client, event):
+            from neonize.proto.Neonize_pb2 import Receipt
+
+            try:
+                source = event.MessageSource
+                if source.IsGroup or source.IsFromMe:
+                    return
+                status = {Receipt.DELIVERED: "delivered", Receipt.READ: "read"}.get(event.Type)
+                if status is None:
+                    return
+                chat = f"{source.Chat.User}@{source.Chat.Server}"
+                for message_id, sent_at in store.record_receipt(
+                    chat, event.MessageIDs, status, event.Timestamp
+                ):
+                    stamp = format_timestamp(sent_at, "%m-%d %H:%M")
+                    when = format_timestamp(event.Timestamp, "%H:%M")
+                    action = "read your message" if status == "read" else "received your message"
+                    output(f"{store.label(chat)} {action} ({stamp}, ID {message_id}) at {when}.")
+            except Exception as error:
+                output(f"Could not process a message receipt: {error}")
 
         @self.client.event(ConnectedEv)
         def connected(client, event):

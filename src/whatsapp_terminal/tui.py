@@ -254,7 +254,7 @@ class WhatsAppUI(App):
         name = self.display(self.store.label(chat)) if chat else "Your conversations"
         self.query_one("#chat-title", Static).update(Text(name))
         self.query_one("#favorite", Button).label = self.favorite_label(chat in favorites)
-        history = self.store.history(chat, self.history_limit) if chat else []
+        history = self.store.history_with_status(chat, self.history_limit) if chat else []
         history_signature = (chat, history)
         if history_signature != self.history_signature:
             log = self.query_one("#messages", RichLog)
@@ -271,7 +271,7 @@ class WhatsAppUI(App):
                 )
             elif not history:
                 log.write("No saved messages yet. Send a message or wait for phone history sync.")
-            for sender, body, timestamp in history:
+            for sender, body, timestamp, status in history:
                 stamp = format_timestamp(timestamp, "%d %b · %H:%M")
                 log.write(
                     Text(
@@ -279,7 +279,17 @@ class WhatsAppUI(App):
                         style="bold #4adeb2" if sender == "You" else "bold #93c5fd",
                     )
                 )
-                log.write(Text(self.display(body) + "\n"))
+                log.write(Text(self.display(body)))
+                if status:
+                    log.write(
+                        Text(
+                            status.capitalize(),
+                            style={"read": "bold #4adeb2", "delivered": "#93c5fd"}.get(
+                                status, "dim"
+                            ),
+                        )
+                    )
+                log.write("")
             if switched or at_bottom:
                 log.scroll_end(animate=False)
             else:

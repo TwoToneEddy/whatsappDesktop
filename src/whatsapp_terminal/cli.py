@@ -186,10 +186,11 @@ class Terminal:
     def show_history(self, count):
         if not self.active:
             raise ValueError("Select a chat first with /contacts and /open NAME.")
-        messages = self.store.history(self.active, count)
-        for sender, body, timestamp in messages:
+        messages = self.store.history_with_status(self.active, count)
+        for sender, body, timestamp, status in messages:
             stamp = format_timestamp(timestamp, "%m-%d %H:%M")
-            self.output(f"{stamp}  {sender}: {body}")
+            suffix = f" [{status}]" if status else ""
+            self.output(f"{stamp}  {sender}: {body}{suffix}")
         if not messages:
             self.output("No local history yet.")
 
