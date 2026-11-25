@@ -28,7 +28,7 @@ HELP = """Commands:
   /favorite [name]     Toggle favorite for a name or the selected chat
   /favorites           List your saved favorites
   /back                Deselect the chat
-  /mute                Mute selected chat on phone until leaving or closing app
+  /mute                Mute selected chat on phone until closing app
   /unmute              Restore this app's temporary mute early
   /send TEXT           Send text that begins with a slash
   /help                Show this help
@@ -106,7 +106,9 @@ class Terminal:
             if command == "/mute":
                 self.backend.muting.enable(self.active)
             else:
-                self.backend.muting.release(force=True)
+                if not self.active:
+                    raise ValueError("Select a chat first to unmute it.")
+                self.backend.muting.release(force=True, chat=self.active)
             return True
         if command == "/help":
             self.output(HELP)
@@ -208,7 +210,7 @@ class Terminal:
     def show_history(self, count):
         if not self.active:
             raise ValueError("Select a chat first with /contacts and /open NAME.")
-        messages = self.store.history_with_status(self.active, count)
+        messages = self.store.history_with_status(self.active, count, mark_seen=True)
         for sender, body, timestamp, status in messages:
             stamp = format_timestamp(timestamp, "%m-%d %H:%M")
             suffix = f" [{status}]" if status else ""
@@ -347,7 +349,7 @@ def _main():
                         and terminal.active.endswith(("@lid", "@s.whatsapp.net"))
                     ):
                         answer = session.prompt(
-                            "Mute this chat on your phone until leaving/closing (no timeout)? [y/N] "
+                            "Mute this chat on your phone until closing the app (no timeout)? [y/N] "
                         )
                         if answer.strip().lower() in {"y", "yes"}:
                             terminal.command("/mute")

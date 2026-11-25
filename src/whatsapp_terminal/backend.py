@@ -61,7 +61,7 @@ class WhatsApp:
         def connected(client, event):
             self.connection_error = None
             self.ready.set()
-            if self.muting.owned:
+            if self.muting.pending_recovery:
                 threading.Thread(target=self.muting.release, daemon=True).start()
             output("Connected. Use /contacts to find people, then /open NAME.")
             self.refresh_contacts_safely()
@@ -168,6 +168,7 @@ class WhatsApp:
                 )
         self.store.save_contacts(contacts)
         self.refresh_identities()
+        self.muting.refresh_known()
 
     def refresh_identities(self):
         if not self.ready.is_set():

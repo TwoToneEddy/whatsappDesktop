@@ -158,6 +158,13 @@ chats preserves unsent drafts until you quit.
 - **Saved** shows your favorites. Click **Favorite** or press **Ctrl+S** to
   toggle the selected chat. Favorites are local to this app, independent of phone
   pins or WhatsApp's own favorites.
+- A leading **`*`** and **`(N new)`** indicate incoming messages not yet viewed
+  in this app. Favorites use **`[Fav]`** instead, independent of unread status.
+  Opening a chat clears its local unread count; incoming messages in the displayed
+  chat are cleared as the view refreshes. Counts persist across restarts. This
+  tracks newly received messages, not old history imports or the phone's unread
+  state, and does not send read receipts. `/open` or `/history` in plain mode also
+  clears the selected chat's local count.
 - **All** shows all known contacts and chats. **Contacts** refreshes contact names.
 - **Older** requests 50 older messages for the current conversation.
 - **Ctrl+R** requests 50 older messages for each of the Recent 5 chats. Your phone
@@ -248,15 +255,19 @@ WhatsApp membership and group permissions.
 ## Temporary phone mute (experimental)
 
 For one-to-one chats, you can request a **shared WhatsApp mute with no timeout**
-while you keep the chat open. This changes the chat setting on linked devices, including the
+until you exit the tool. This changes the chat setting on linked devices, including the
 phone; it is not a terminal-only or phone-only notification filter.
 
 - **Plain mode:** after `/open`, answer the mute question with `y`. Enter or `n`
   leaves the setting alone. You can also use `/mute` later.
 - **Full-screen:** select a person and click **Mute**. The button becomes
   **Unmute** while the temporary mute is active.
-- Switch chats, use `/back`, quit normally, or use `/unmute` to attempt
-  restoration. `/unmute` only releases a temporary mute owned by this app; it
+- The sidebar prefixes chats with **[Muted]** based on known mute settings.
+  This includes existing phone mutes discovered on connection or `/contacts`
+  refresh, as well as successful mute requests from this app.
+- Switching chats or using `/back` leaves chats muted. You can mute multiple
+  chats; normal exit attempts to restore every app-owned mute. `/unmute` or the
+  **Unmute** button explicitly releases only the selected chat's mute early; it
   does not remove an existing mute you set on your phone.
 
 Existing active mutes are left untouched. Before restoration the app refreshes
@@ -265,14 +276,16 @@ own. A finite mute or an already-unmuted chat is left unchanged. An indefinite
 mute you manually set later is indistinguishable from the app's own mute, so
 avoid changing that setting concurrently while this feature is active.
 
-Normal exit restores the app-owned mute before disconnecting. This includes
+Normal exit restores all app-owned mutes before disconnecting. This includes
 `/quit`, plain-mode Ctrl-D, TUI Ctrl-Q, and handled SIGTERM/SIGHUP signals (such
 as a normal process stop or terminal hangup). **SIGKILL, power loss, a crash, or
 loss of network connectivity can leave the chat muted indefinitely.** In that
 case, unmute on your phone or restart the app and let it connect. A private
-`mute-recovery.json` file in the data directory records ownership before sending
-the mute request; restoration is retried on connection and the record is removed
-after successful restoration or detection of a changed setting. Keep this file
+`mute-recovery.json` file in the data directory records each owned chat before sending
+its mute request. Leftover records from a previous run are retried on connection;
+ordinary reconnects do not release mutes created in the current session. Each
+record is removed after successful restoration or detection of a changed setting,
+and failure for one chat does not prevent attempts for the others. Keep this file
 with your session data. Group chats and offline demo mode do not offer this feature.
 
 This uses a synced mute app-state patch, not a local database change. Requests

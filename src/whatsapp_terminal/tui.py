@@ -107,6 +107,7 @@ class WhatsAppUI(App):
     Input { background: #14242e; }
     Input:focus { border: tall #34d399; }
     Button.-active { background: #1e5342; color: #8df4c9; }
+    #mute.-muted { background: #1e5342; color: #8df4c9; }
     Footer { background: #14242e; }
     """
 
@@ -224,7 +225,14 @@ class WhatsAppUI(App):
         else:
             rows = self.store.recent(5)
         rows = [row for row in rows if query in " ".join(row).casefold()]
-        signature = (rows, tuple(favorites), self.terminal.active)
+        chat = self.store.canonical(self.terminal.active)
+        history = (
+            self.store.history_with_status(chat, self.history_limit, mark_seen=True) if chat else []
+        )
+        unread = self.store.unread_counts()
+        muting = getattr(self.backend, "muting", None)
+        muted_chats = frozenset(jid for jid, name in rows if muting and muting.is_muted(jid))
+        signature = (rows, tuple(favorites), self.terminal.active, muted_chats, unread)
         if signature != self.list_signature:
             people = self.query_one("#people", OptionList)
             previous = (
@@ -238,8 +246,11 @@ class WhatsAppUI(App):
                 [
                     Option(
                         Text(
-                            f"{('★' if self.show_emoji else '*') if jid in favorites else '-'}  {self.display(name)}",
-                            style="bold" if jid == self.terminal.active else "",
+                            f"{'* ' if unread.get(jid) else '  '}"
+                            f"{'[Muted] ' if jid in muted_chats else ''}"
+                            f"{'[Fav] ' if jid in favorites else ''}{self.display(name)}"
+                            f"{f' ({unread[jid]} new)' if unread.get(jid) else ''}",
+                            style="bold" if jid == self.terminal.active or unread.get(jid) else "",
                         ),
                         id=jid,
                     )
@@ -274,8 +285,7 @@ class WhatsAppUI(App):
             self.backend and hasattr(self.backend, "muting") and self.backend.muting.enabled(chat)
         )
         mute.label = "Unmute" if muted else "Mute"
-        mute.set_class(bool(muted), "-active")
-        history = self.store.history_with_status(chat, self.history_limit) if chat else []
+        mute.set_class(bool(muted), "-muted")
         history_signature = (chat, history)
         if history_signature != self.history_signature:
             log = self.query_one("#messages", RichLog)

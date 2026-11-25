@@ -55,7 +55,7 @@ def test_patch_and_restore(muting):
     assert settings.MutedUntil == 253402300799
     manager.release(force=True)
     assert not patches[-1].Mutations[0].Value.muteAction.muted
-    assert manager.owned is None
+    assert not manager.owned
 
 
 def test_preserves_existing_and_phone_changes(muting):
@@ -82,18 +82,21 @@ def test_disconnect_keeps_mute_until_reconnected(muting, monkeypatch):
     assert manager.enabled("123@lid")
     manager.backend.ready.set()
     manager.release(force=True)
-    assert manager.owned is None
+    assert not manager.owned
     assert len(patches) == 2
 
 
-def test_switch_restores_and_same_chat_does_not(muting):
+def test_switch_and_back_keep_chat_muted(muting):
     manager, settings, patches, notices = muting
     manager.enable("123@lid")
     manager.release()
     assert len(patches) == 1
-    manager.selected = "456@lid"
+    manager.select("456@lid")
     manager.release()
-    assert len(patches) == 2
+    manager.select(None)
+    manager.release()
+    assert len(patches) == 1
+    assert manager.enabled("123@lid")
 
 
 def test_invalid_or_disconnected_chat_never_sends(muting):
@@ -157,7 +160,7 @@ def test_plain_asks_before_muting(monkeypatch, tmp_path, answer, expected):
 
 
 def test_tui_mute_button(muting):
-    from textual.widgets import Button
+    from textual.widgets import Button, OptionList
 
     from whatsapp_terminal.store import Store
     from whatsapp_terminal.tui import WhatsAppUI
@@ -181,11 +184,20 @@ def test_tui_mute_button(muting):
             await pilot.pause()
             assert manager.enabled("123@lid")
             assert str(app.query_one("#mute", Button).label) == "Unmute"
+            people = app.query_one("#people", OptionList)
+            assert "[Muted]" in str(people.get_option_at_index(0).prompt)
+            app.select_chat(None)
+            await pilot.pause()
+            assert manager.enabled("123@lid")
+            assert "[Muted]" in str(people.get_option_at_index(0).prompt)
+            app.select_chat("123@lid")
+            await pilot.pause()
             await pilot.click("#mute")
             await app.workers.wait_for_complete()
             await pilot.pause()
-            assert manager.owned is None
+            assert not manager.owned
             assert str(app.query_one("#mute", Button).label) == "Mute"
+            assert "[Muted]" not in str(people.get_option_at_index(0).prompt)
 
     asyncio.run(scenario())
 
@@ -195,7 +207,7 @@ def test_close_restores_and_prevents_new_mutes(muting):
     manager.enable("123@lid")
     manager.close()
     assert settings.MutedUntil == 0
-    assert manager.owned is None
+    assert not manager.owned
     with pytest.raises(RuntimeError, match="closing"):
         manager.enable("123@lid")
 
@@ -239,3 +251,66 @@ def test_signal_exit_runs_plain_cleanup(monkeypatch, tmp_path):
         cli.main()
     assert stopped == [True]
     assert signal.getsignal(signal.SIGTERM) == previous
+
+
+def test_multiple_mutes_persist_and_cleanup_continues_after_failure(muting, tmp_path):
+    manager, settings, patches, notices = muting
+    states = {"123@lid": 0, "456@lid": 0, "789@lid": 5000}
+    failed = set()
+
+    def get_settings(jid):
+        return SimpleNamespace(MutedUntil=states[f"{jid.User}@{jid.Server}"])
+
+    def send(patch):
+        chat = patch.Mutations[0].Index[1]
+        if chat in failed:
+            raise RuntimeError("Network error")
+        patches.append(patch)
+        states[chat] = 253402300799 if patch.Mutations[0].Value.muteAction.muted else 0
+
+    manager.backend.client.chat_settings.get_chat_settings = get_settings
+    manager.backend.client.send_app_state = send
+    path = tmp_path / "mute-recovery.json"
+    manager.recovery_path = path
+    for chat in states:
+        manager.select(chat)
+        manager.enable(chat)
+    assert manager.owned == {"123@lid", "456@lid"}
+    assert manager.is_muted("789@lid")
+    manager.release()
+    assert len(patches) == 2
+    failed.add("123@lid")
+    manager.close()
+    assert states["456@lid"] == 0
+    assert states["789@lid"] == 5000
+    assert manager.owned == {"123@lid"}
+    restarted = TemporaryMute(manager.backend, path)
+    assert restarted.pending_recovery == {"123@lid"}
+    failed.clear()
+    restarted.release()
+    assert states["123@lid"] == 0
+    assert not path.exists()
+
+
+def test_legacy_recovery_file_is_supported(muting, tmp_path):
+    manager, settings, patches, notices = muting
+    path = tmp_path / "mute-recovery.json"
+    path.write_text('{"chat": "123@lid"}')
+    restored = TemporaryMute(manager.backend, path)
+    assert restored.pending_recovery == {"123@lid"}
+
+
+def test_explicit_unmute_only_releases_selected_chat(muting):
+    from whatsapp_terminal.cli import Terminal
+    from whatsapp_terminal.store import Store
+
+    manager, settings, patches, notices = muting
+    manager.backend.muting = manager
+    manager.enable("123@lid")
+    settings.MutedUntil = 0
+    manager.select("456@lid")
+    manager.enable("456@lid")
+    terminal = Terminal(Store(":memory:"), manager.backend)
+    terminal.active = "456@lid"
+    terminal.command("/unmute")
+    assert manager.owned == {"123@lid"}

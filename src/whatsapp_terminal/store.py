@@ -41,6 +41,9 @@ class Store:
                 body TEXT NOT NULL, timestamp REAL NOT NULL, PRIMARY KEY(chat, id)
             );
             CREATE INDEX IF NOT EXISTS timeline ON messages(chat, timestamp);
+            CREATE TABLE IF NOT EXISTS unread (
+                chat TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(chat, id)
+            );
             CREATE TABLE IF NOT EXISTS receipts (
                 chat TEXT NOT NULL, id TEXT NOT NULL, rank INTEGER NOT NULL,
                 timestamp REAL NOT NULL, PRIMARY KEY(chat, id)
@@ -82,12 +85,19 @@ class Store:
         with self.lock, self.db:
             chat = self.canonical(chat)
             self.chat(chat)
-            return bool(
+            added = bool(
                 self.db.execute(
                     "INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?, ?, ?)",
                     (chat, message_id, sender, body, timestamp_seconds(timestamp), from_me),
                 ).rowcount
             )
+            if added and from_me is False:
+                self.db.execute("INSERT OR IGNORE INTO unread VALUES (?, ?)", (chat, message_id))
+            return added
+
+    def unread_counts(self):
+        with self.lock:
+            return dict(self.db.execute("SELECT chat, COUNT(*) FROM unread GROUP BY chat"))
 
     def import_history(self, chats, messages):
         with self.lock, self.db:
@@ -203,8 +213,10 @@ class Store:
                     changed.append((message_id, message[0]))
         return changed
 
-    def history_with_status(self, chat, limit=30):
-        with self.lock:
+    def history_with_status(self, chat, limit=30, mark_seen=False):
+        with self.lock, self.db:
+            if mark_seen:
+                self.db.execute("DELETE FROM unread WHERE chat=?", (self.canonical(chat),))
             return list(
                 reversed(
                     self.db.execute(
@@ -280,6 +292,10 @@ class Store:
                 "INSERT OR IGNORE INTO favorites SELECT ? FROM favorites WHERE jid=?", (lid, phone)
             )
             self.db.execute("DELETE FROM messages WHERE chat=?", (phone,))
+            self.db.execute(
+                "INSERT OR IGNORE INTO unread SELECT ?, id FROM unread WHERE chat=?", (lid, phone)
+            )
+            self.db.execute("DELETE FROM unread WHERE chat=?", (phone,))
             self.db.execute(
                 "INSERT INTO receipts SELECT ?, id, rank, timestamp FROM receipts WHERE chat=? "
                 "ON CONFLICT(chat,id) DO UPDATE SET rank=excluded.rank, timestamp=excluded.timestamp "
