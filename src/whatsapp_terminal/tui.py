@@ -4,6 +4,7 @@ import logging
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -74,6 +75,8 @@ class InfoScreen(ModalScreen):
 class WhatsAppUI(App):
     TITLE = "wat"
     BINDINGS = [
+        Binding("up", "chat_list('up')", show=False),
+        Binding("down", "chat_list('down')", show=False),
         ("ctrl+q", "quit", "Quit"),
         ("escape", "back", "Back"),
         ("ctrl+f", "search", "Search"),
@@ -124,6 +127,14 @@ class WhatsAppUI(App):
 
     def display(self, value):
         return display_text(value, self.show_emoji)
+
+    def _set_pointer_shape(self, shape: str) -> None:
+        """Avoid OSC 22 sequences that leak text and ring bells on older terminals."""
+        return
+
+    def bell(self) -> None:
+        """Keep the interface silent, including invalid-input notifications."""
+        return
 
     def favorite_label(self, saved):
         if self.show_emoji:
@@ -425,6 +436,20 @@ class WhatsAppUI(App):
     def action_search(self):
         self.query_one("#search", Input).focus()
 
+    def action_chat_list(self, direction):
+        if self.busy or isinstance(self.screen, InfoScreen):
+            return
+        people = self.query_one("#people", OptionList)
+        if self.focused is people:
+            if direction == "up":
+                people.action_cursor_up()
+            else:
+                people.action_cursor_down()
+        else:
+            people.focus()
+            if people.highlighted is None and self.rows:
+                people.highlighted = 0
+
     def action_favorite(self):
         if not self.busy and self.terminal.active:
             self.store.toggle_favorite(self.terminal.active)
@@ -436,7 +461,8 @@ class WhatsAppUI(App):
     def action_help(self):
         self.push_screen(
             InfoScreen(
-                "Tab: move focus · Enter: select/send · Esc: back\n"
+                "Up/Down: focus/browse chats · Enter: select/send · Esc: back\n"
+                "Tab/Shift+Tab: move focus · Left/Right: edit text\n"
                 "Ctrl+F: search · Ctrl+S: favorite · Ctrl+R: sync Recent 5\n"
                 "Ctrl+Q: quit\n\n" + HELP
             )

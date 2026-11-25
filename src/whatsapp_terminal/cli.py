@@ -298,6 +298,8 @@ def _main():
             app.run()
         finally:
             if backend:
+                sink["emit"] = output
+                output("Closing WhatsApp; restoring any app-owned mute…")
                 backend.stop()
         return
     terminal = Terminal(store, backend)

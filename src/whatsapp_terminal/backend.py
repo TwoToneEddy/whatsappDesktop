@@ -223,7 +223,7 @@ class WhatsApp:
             self.muting.close()
         finally:
             self.ready.clear()
-            self.client.disconnect()
+            self.client.stop()
 
     def sync_recent(self):
         if not self.ready.is_set():

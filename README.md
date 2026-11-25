@@ -142,8 +142,14 @@ WAT_SELINUX_LABEL=disable bash scripts/wat-container.sh --emoji
 ```
 
 The new interface is the default. Use a terminal at least 80 columns by 24 rows.
+The TUI disables terminal bells and mouse-pointer shape escape sequences for
+compatibility with older terminals (avoiding hover beeps and stray `22;default`
+text). Mouse clicks, hover highlighting, and scrolling remain enabled.
 Click a person in the sidebar or use Tab, arrow keys, and Enter. Search looks
-through all known people and chats, even when Recent 5 is selected. Type a message
+through all known people and chats, even when Recent 5 is selected. Up/Down from
+search or the composer focuses the chat list; further arrows move the highlight,
+and Enter opens the highlighted chat. Left/Right still edit text in input fields.
+Tab/Shift+Tab moves between controls. Type a message
 in the composer and press Enter to send. Failed sends keep your draft; switching
 chats preserves unsent drafts until you quit.
 

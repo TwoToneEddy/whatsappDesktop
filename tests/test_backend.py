@@ -213,3 +213,30 @@ def test_receipts_use_real_protobuf_and_ignore_self_and_groups(backend):
     assert instance.store.history_with_status(chat)[0][3] == "read"
     handler(instance.client, event)
     assert len(notices) == 2
+
+
+def test_shutdown_restores_mute_before_stopping_native_worker(backend):
+    instance, events, messages = backend
+    calls = []
+    instance.ready.set()
+    instance.muting.close = lambda: calls.append(("restore", instance.ready.is_set()))
+    instance.client.stop = lambda: calls.append(("stop", instance.ready.is_set()))
+    instance.client.disconnect = lambda: pytest.fail(
+        "Disconnect alone leaves the native worker alive"
+    )
+    instance.stop()
+    assert calls == [("restore", True), ("stop", False)]
+
+
+def test_shutdown_stops_native_worker_even_if_mute_cleanup_fails(backend):
+    instance, events, messages = backend
+    calls = []
+
+    def fail():
+        raise RuntimeError("Cleanup failed")
+
+    instance.muting.close = fail
+    instance.client.stop = lambda: calls.append("stop")
+    with pytest.raises(RuntimeError, match="Cleanup failed"):
+        instance.stop()
+    assert calls == ["stop"]
