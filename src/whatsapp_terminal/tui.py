@@ -150,6 +150,7 @@ class WhatsAppUI(App):
                     yield Button(self.favorite_label(False), id="favorite")
                     yield Button("Older", id="older")
                     yield Button("Contacts", id="refresh")
+                    yield Button("Mute", id="mute")
                 yield RichLog(id="messages", wrap=True, markup=False, highlight=False)
                 yield Input(
                     placeholder="Select a chat to start · /help for commands", id="composer"
@@ -254,6 +255,15 @@ class WhatsAppUI(App):
         name = self.display(self.store.label(chat)) if chat else "Your conversations"
         self.query_one("#chat-title", Static).update(Text(name))
         self.query_one("#favorite", Button).label = self.favorite_label(chat in favorites)
+        mute = self.query_one("#mute", Button)
+        mute.disabled = (
+            not self.backend or not chat or not chat.endswith(("@lid", "@s.whatsapp.net"))
+        )
+        muted = (
+            self.backend and hasattr(self.backend, "muting") and self.backend.muting.enabled(chat)
+        )
+        mute.label = "Unmute" if muted else "Mute"
+        mute.set_class(bool(muted), "-active")
         history = self.store.history_with_status(chat, self.history_limit) if chat else []
         history_signature = (chat, history)
         if history_signature != self.history_signature:
@@ -353,6 +363,9 @@ class WhatsAppUI(App):
             self.submit("/sync 50", clear=False)
         elif button == "refresh":
             self.submit("/contacts", clear=False)
+        elif button == "mute":
+            command = "/unmute" if self.backend.muting.enabled(self.terminal.active) else "/mute"
+            self.submit(command, clear=False)
 
     @on(Input.Submitted, "#composer")
     def composer_submitted(self, event):

@@ -3,6 +3,7 @@ import time
 
 from .history import import_batch, message_text
 from .timestamps import format_timestamp
+from .muting import TemporaryMute
 
 
 def chat_jid(chat):
@@ -32,6 +33,7 @@ class WhatsApp:
         self.ready = threading.Event()
         self.connection_error = None
         self.client = NewClient(str(data_dir / "session.db"))
+        self.muting = TemporaryMute(self, data_dir / "mute-recovery.json")
 
         @self.client.event(ReceiptEv)
         def receipt(client, event):
@@ -59,6 +61,8 @@ class WhatsApp:
         def connected(client, event):
             self.connection_error = None
             self.ready.set()
+            if self.muting.owned:
+                threading.Thread(target=self.muting.release, daemon=True).start()
             output("Connected. Use /contacts to find people, then /open NAME.")
             self.refresh_contacts_safely()
             threading.Thread(target=self.refresh_groups_safely, daemon=True).start()
@@ -215,8 +219,11 @@ class WhatsApp:
         self.store.import_history(groups, [])
 
     def stop(self):
-        self.ready.clear()
-        self.client.disconnect()
+        try:
+            self.muting.close()
+        finally:
+            self.ready.clear()
+            self.client.disconnect()
 
     def sync_recent(self):
         if not self.ready.is_set():

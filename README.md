@@ -239,6 +239,43 @@ member. Recent 5 only includes groups with known activity timestamps. Historical
 groups stay in your local database if you later leave; sending is subject to
 WhatsApp membership and group permissions.
 
+## Temporary phone mute (experimental)
+
+For one-to-one chats, you can request a **shared WhatsApp mute with no timeout**
+while you keep the chat open. This changes the chat setting on linked devices, including the
+phone; it is not a terminal-only or phone-only notification filter.
+
+- **Plain mode:** after `/open`, answer the mute question with `y`. Enter or `n`
+  leaves the setting alone. You can also use `/mute` later.
+- **Full-screen:** select a person and click **Mute**. The button becomes
+  **Unmute** while the temporary mute is active.
+- Switch chats, use `/back`, quit normally, or use `/unmute` to attempt
+  restoration. `/unmute` only releases a temporary mute owned by this app; it
+  does not remove an existing mute you set on your phone.
+
+Existing active mutes are left untouched. Before restoration the app refreshes
+the synced settings and only clears a still-indefinite mute it recorded as its
+own. A finite mute or an already-unmuted chat is left unchanged. An indefinite
+mute you manually set later is indistinguishable from the app's own mute, so
+avoid changing that setting concurrently while this feature is active.
+
+Normal exit restores the app-owned mute before disconnecting. This includes
+`/quit`, plain-mode Ctrl-D, TUI Ctrl-Q, and handled SIGTERM/SIGHUP signals (such
+as a normal process stop or terminal hangup). **SIGKILL, power loss, a crash, or
+loss of network connectivity can leave the chat muted indefinitely.** In that
+case, unmute on your phone or restart the app and let it connect. A private
+`mute-recovery.json` file in the data directory records ownership before sending
+the mute request; restoration is retried on connection and the record is removed
+after successful restoration or detection of a changed setting. Keep this file
+with your session data. Group chats and offline demo mode do not offer this feature.
+
+This uses a synced mute app-state patch, not a local database change. Requests
+and restoration add network traffic. Phone notification behavior has not been
+verified by the automated tests: for your first trial, choose a normally unmuted
+chat, enable the feature, check its mute setting on your phone, then use `/back`
+and check that it clears. Do not rely on it for important notifications until
+you have confirmed propagation on your account.
+
 ## Phone history sync
 
 ### Delivery and read status

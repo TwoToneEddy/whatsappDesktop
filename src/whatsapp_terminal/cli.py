@@ -1,5 +1,6 @@
 import argparse
 import os
+import signal
 import sys
 import time
 import uuid
@@ -27,6 +28,8 @@ HELP = """Commands:
   /favorite [name]     Toggle favorite for a name or the selected chat
   /favorites           List your saved favorites
   /back                Deselect the chat
+  /mute                Mute selected chat on phone until leaving or closing app
+  /unmute              Restore this app's temporary mute early
   /send TEXT           Send text that begins with a slash
   /help                Show this help
   /quit                Disconnect and exit (session stays linked)
@@ -46,6 +49,17 @@ class Terminal:
         self.active = None
         self.listed = []
         self.output = emit
+
+    @property
+    def active(self):
+        return self._active
+
+    @active.setter
+    def active(self, chat):
+        previous = getattr(self, "_active", None)
+        self._active = chat
+        if previous != chat and self.backend and hasattr(self.backend, "muting"):
+            self.backend.muting.select(chat)
 
     def list_people(self, rows):
         self.listed = rows
@@ -86,6 +100,14 @@ class Terminal:
         argument = argument.strip()
         if command == "/quit":
             return False
+        if command in {"/mute", "/unmute"}:
+            if not self.backend:
+                raise ValueError("Phone muting is unavailable in demo mode.")
+            if command == "/mute":
+                self.backend.muting.enable(self.active)
+            else:
+                self.backend.muting.release(force=True)
+            return True
         if command == "/help":
             self.output(HELP)
         elif command == "/back":
@@ -196,6 +218,22 @@ class Terminal:
 
 
 def main():
+    def shutdown(signum, frame):
+        raise SystemExit(128 + signum)
+
+    previous = {}
+    try:
+        for name in ("SIGTERM", "SIGHUP"):
+            if hasattr(signal, name):
+                signum = getattr(signal, name)
+                previous[signum] = signal.signal(signum, shutdown)
+        _main()
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _main():
     parser = argparse.ArgumentParser(description="Lightweight WhatsApp terminal client")
     parser.add_argument("--demo", action="store_true", help="Try offline without an account")
     modes = parser.add_mutually_exclusive_group()
@@ -280,6 +318,8 @@ def main():
                 "/recent",
                 "/sync-recent",
                 "/back",
+                "/mute",
+                "/unmute",
             ]
         )
     )
@@ -298,6 +338,17 @@ def main():
                     line = session.prompt(f"{label}> ")
                     if not terminal.command(line):
                         break
+                    if (
+                        backend
+                        and line.split()[:1] == ["/open"]
+                        and terminal.active
+                        and terminal.active.endswith(("@lid", "@s.whatsapp.net"))
+                    ):
+                        answer = session.prompt(
+                            "Mute this chat on your phone until leaving/closing (no timeout)? [y/N] "
+                        )
+                        if answer.strip().lower() in {"y", "yes"}:
+                            terminal.command("/mute")
                 except KeyboardInterrupt:
                     continue
                 except EOFError:
