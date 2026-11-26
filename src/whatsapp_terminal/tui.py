@@ -73,6 +73,7 @@ class WhatsAppUI(App):
         ("ctrl+s", "favorite", "Favorite"),
         ("ctrl+r", "sync_recent", "Sync recent"),
         ("f1", "help", "Help"),
+        ("f2", "toggle_mute", "Mute/unmute"),
     ]
     CSS = """
     Screen { background: #0b141b; color: #dce7ed; }
@@ -130,6 +131,32 @@ class WhatsAppUI(App):
         if self.show_emoji:
             return "★ Saved" if saved else "☆ Favorite"
         return "Saved" if saved else "Favorite"
+
+    def welcome(self, log):
+        log.write(Text("\nWelcome back.\n", style="bold #4adeb2"))
+        log.write(
+            "Pick a recent chat, save your favorites, or search for someone.\n"
+            "Enter opens a highlighted person. Escape brings you back here.\n\n"
+            "Recent chats update as WhatsApp syncs activity from your phone."
+        )
+
+    def write_message(self, log, sender, body, timestamp, status):
+        stamp = format_timestamp(timestamp, "%d %b · %H:%M")
+        log.write(
+            Text(
+                f"{self.display(sender)}  ·  {stamp}",
+                style="bold #4adeb2" if sender == "You" else "bold #93c5fd",
+            )
+        )
+        log.write(Text(self.display(body)))
+        if status:
+            log.write(
+                Text(
+                    status.capitalize(),
+                    style={"read": "bold #4adeb2", "delivered": "#93c5fd"}.get(status, "dim"),
+                )
+            )
+        log.write("")
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -273,33 +300,11 @@ class WhatsAppUI(App):
             switched = self.history_signature is None or self.history_signature[0] != chat
             log.clear()
             if not chat:
-                log.write(Text("\nWelcome back.\n", style="bold #4adeb2"))
-                log.write(
-                    "Pick a recent chat, save your favorites, or search for someone.\n"
-                    "Enter opens a highlighted person. Escape brings you back here.\n\n"
-                    "Recent chats update as WhatsApp syncs activity from your phone."
-                )
+                self.welcome(log)
             elif not history:
                 log.write("No saved messages yet. Send a message or wait for phone history sync.")
             for sender, body, timestamp, status in history:
-                stamp = format_timestamp(timestamp, "%d %b · %H:%M")
-                log.write(
-                    Text(
-                        f"{self.display(sender)}  ·  {stamp}",
-                        style="bold #4adeb2" if sender == "You" else "bold #93c5fd",
-                    )
-                )
-                log.write(Text(self.display(body)))
-                if status:
-                    log.write(
-                        Text(
-                            status.capitalize(),
-                            style={"read": "bold #4adeb2", "delivered": "#93c5fd"}.get(
-                                status, "dim"
-                            ),
-                        )
-                    )
-                log.write("")
+                self.write_message(log, sender, body, timestamp, status)
             if switched or at_bottom:
                 log.scroll_end(animate=False)
             else:
@@ -364,8 +369,7 @@ class WhatsAppUI(App):
         elif button == "refresh":
             self.submit("/contacts", clear=False)
         elif button == "mute":
-            command = "/unmute" if self.backend.muting.enabled(self.terminal.active) else "/mute"
-            self.submit(command, clear=False)
+            self.action_toggle_mute()
 
     @on(Input.Submitted, "#composer")
     def composer_submitted(self, event):
@@ -447,12 +451,89 @@ class WhatsAppUI(App):
     def action_sync_recent(self):
         self.submit("/sync-recent", clear=False)
 
+    def action_toggle_mute(self):
+        chat = self.terminal.active
+        if (
+            self.busy
+            or isinstance(self.screen, InfoScreen)
+            or not self.backend
+            or not hasattr(self.backend, "muting")
+            or not chat
+            or not chat.endswith(("@lid", "@s.whatsapp.net"))
+        ):
+            return
+        command = "/unmute" if self.backend.muting.enabled(chat) else "/mute"
+        self.submit(command, clear=False)
+
     def action_help(self):
         self.push_screen(
             InfoScreen(
                 "Up/Down: focus/browse chats · Enter: select/send · Esc: back\n"
                 "Tab/Shift+Tab: move focus · Left/Right: edit text\n"
                 "Ctrl+F: search · Ctrl+S: favorite · Ctrl+R: sync Recent 5\n"
-                "Ctrl+Q: quit\n\n" + HELP
+                "F2: mute/unmute selected chat · Ctrl+Q: quit\n\n" + HELP
             )
         )
+
+
+class DiscreetUI(WhatsAppUI):
+    CSS = (
+        WhatsAppUI.CSS
+        + """
+    Screen { background: #101010; color: #cccccc; }
+    #brand { display: none; }
+    #sidebar { width: 28; padding: 0 1 0 0; border-right: solid #505050; }
+    #conversation { padding: 0 0 0 1; }
+    #chat-title { height: 1; color: #dddddd; }
+    #list-note { height: 1; padding: 0; color: #999999; }
+    #toolbar { margin-bottom: 0; }
+    #messages { border: none; padding: 0; background: #101010; }
+    #people { background: #101010; color: #cccccc; }
+    #people > .option-list--option-highlighted,
+    #people > .option-list--option-hover-highlighted {
+        background: #303030; color: #ffffff; text-style: bold;
+    }
+    Input, #composer, #search {
+        height: 1; border: none; padding: 0; margin: 0;
+        background: #202020; color: #dddddd;
+    }
+    Input:focus { border: none; background: #303030; }
+    Input > .input--placeholder { color: #999999; }
+    Input > .input--cursor { background: #cccccc; color: #101010; }
+    Input > .input--selection { background: #505050; }
+    Button, #toolbar Button, #filters Button, #groups {
+        background: #101010; color: #aaaaaa; border: none;
+        text-style: none; tint: transparent;
+    }
+    Button:hover, Button:focus, Button.-active, #mute.-muted,
+    #toolbar Button:hover, #toolbar Button:focus, #filters Button.-active,
+    #groups.-active, #groups:hover, #groups:focus {
+        background: #303030; color: #ffffff; text-style: bold; tint: transparent;
+    }
+    #status, #activity { margin: 0; color: #999999; background: #101010; }
+    #activity { height: 1; }
+    Footer, FooterKey { background: #101010; color: #aaaaaa; }
+    FooterKey:hover { background: #303030; }
+    FooterKey > .footer-key--key { background: #303030; color: #dddddd; }
+    FooterKey > .footer-key--description { color: #aaaaaa; }
+    InfoScreen #dialog { background: #101010; border: solid #777777; color: #cccccc; }
+    InfoScreen #dialog Button { height: 1; background: #303030; color: #dddddd; }
+    * { scrollbar-color: #666666; scrollbar-color-hover: #888888;
+        scrollbar-color-active: #aaaaaa; scrollbar-background: #101010;
+        scrollbar-background-hover: #101010; scrollbar-background-active: #101010; }
+    """
+    )
+
+    def __init__(self, store, backend=None, show_emoji=False):
+        super().__init__(store, backend, show_emoji=False)
+
+    def welcome(self, log):
+        log.write("Select a chat. /help for commands. Ctrl+Q to quit.")
+
+    def write_message(self, log, sender, body, timestamp, status):
+        stamp = format_timestamp(timestamp, "%d %b %H:%M")
+        line = Text(f"[{stamp}] {self.display(sender)}> ")
+        line.append(self.display(body))
+        if status:
+            line.append(f" [{status}]", style="dim")
+        log.write(line)

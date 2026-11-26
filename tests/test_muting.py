@@ -145,11 +145,13 @@ def test_plain_asks_before_muting(monkeypatch, tmp_path, answer, expected):
     assert len(enabled) == expected
 
 
-def test_tui_mute_button(muting):
-    from textual.widgets import Button, OptionList
+@pytest.mark.parametrize("discreet", [False, True])
+@pytest.mark.parametrize("keyboard", [False, True])
+def test_tui_mute_button_and_shortcut(muting, discreet, keyboard):
+    from textual.widgets import Button, Input, OptionList
 
     from whatsapp_terminal.store import Store
-    from whatsapp_terminal.tui import WhatsAppUI
+    from whatsapp_terminal.tui import DiscreetUI, WhatsAppUI
 
     manager, settings, patches, notices = muting
     backend = manager.backend
@@ -161,14 +163,32 @@ def test_tui_mute_button(muting):
     async def scenario():
         store = Store(":memory:")
         store.add("123@lid", "one", "You", "Hello", 100, True)
-        app = WhatsAppUI(store, backend)
+        app = (DiscreetUI if discreet else WhatsAppUI)(store, backend)
         async with app.run_test() as pilot:
             assert app.query_one("#mute", Button).disabled
+            await pilot.press("f2")
+            assert not patches
+            app.select_chat("123@g.us")
+            await pilot.press("f2")
+            assert not patches
             app.select_chat("123@lid")
-            await pilot.click("#mute")
+            composer = app.query_one("#composer", Input)
+            composer.value = "Unsent draft"
+            app.busy = True
+            await pilot.press("f2")
+            app.busy = False
+            assert not patches
+            await pilot.press("f1", "f2")
+            assert not patches
+            await pilot.press("escape")
+            if keyboard:
+                await pilot.press("f2")
+            else:
+                await pilot.click("#mute")
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert manager.enabled("123@lid")
+            assert composer.value == "Unsent draft"
             assert str(app.query_one("#mute", Button).label) == "Unmute"
             people = app.query_one("#people", OptionList)
             assert "[Muted]" in str(people.get_option_at_index(0).prompt)
@@ -178,10 +198,14 @@ def test_tui_mute_button(muting):
             assert "[Muted]" in str(people.get_option_at_index(0).prompt)
             app.select_chat("123@lid")
             await pilot.pause()
-            await pilot.click("#mute")
+            if keyboard:
+                await pilot.press("f2")
+            else:
+                await pilot.click("#mute")
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert not manager.owned
+            assert composer.value == "Unsent draft"
             assert str(app.query_one("#mute", Button).label) == "Mute"
             assert "[Muted]" not in str(people.get_option_at_index(0).prompt)
 

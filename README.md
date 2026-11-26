@@ -1,7 +1,8 @@
 # wat — WhatsApp in your terminal
 
-A uv-managed Python terminal client with a full-screen Textual interface and a
-basic `--plain` prompt. This experimental **Baileys backend branch** removes
+A uv-managed Python terminal client with three interfaces: a modern TUI,
+a discreet terminal-style TUI, and a basic `--plain` prompt.
+This experimental **Baileys backend branch** removes
 Neonize, its glibc-linked shared library, and libmagic. No browser or container
 is required when Python and Node.js run on your host.
 
@@ -90,6 +91,7 @@ Neonize.
 
 ```sh
 uv run wat                 # full-screen TUI
+uv run wat --discreet      # compact monochrome terminal-style TUI
 uv run wat --plain         # line-based prompt
 uv run wat --emoji         # enable emoji glyphs in TUI only
 uv run wat --data-dir /private/path
@@ -124,11 +126,23 @@ history, and Favorite / Older / Contacts / Mute controls. Up/Down from the
 composer/search focuses the list; further arrows move selection, Enter opens
 it. Tab cycles controls; Left/Right edits input. Escape goes back, Ctrl+F
 searches, Ctrl+S favorites, Ctrl+R syncs recent chats, F1 helps, Ctrl+Q quits.
+F2 toggles mute/unmute for the selected one-to-one chat in either TUI, without
+clearing your draft. It follows the same mute ownership and exit cleanup rules
+as the button; it does nothing for groups, demo mode, or no selected chat.
 Bells and pointer-shape escapes are disabled for older terminals.
 
 **Plain:** Ctrl-C cancels input; Ctrl-D or `/quit` exits. Tab completes commands.
 Failed sends are not automatically retried. TUI preserves failed drafts; plain
 input history lets you retrieve the text.
+
+**Discreet TUI:** `--discreet` (also spelled `--discrete`) keeps the same
+sidebar, controls, shortcuts, drafts, and backend as the modern TUI, with a
+monochrome palette, flat single-line inputs, no branding banner, and compact
+`[date time] sender> message [read]` transcript lines. It always uses text names
+for emoji, even with `--emoji`. This is a visual style, not a privacy mode:
+names, message contents, and pairing QR codes remain visible. The three mode
+flags are mutually exclusive; the modern TUI remains the default. Try it offline
+with `uv run wat --demo --discreet`. Container launchers forward the same flag.
 
 The sidebar uses `*` and `(N new)` only for locally unviewed incoming messages,
 `[Fav]` for favorites, and `[Muted]` for known mute state. Opening a chat clears

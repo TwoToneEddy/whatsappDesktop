@@ -2,10 +2,16 @@ import asyncio
 import threading
 from types import SimpleNamespace
 
-from textual.widgets import Input
+import pytest
+from textual.widgets import Input, RichLog
 
 from whatsapp_terminal.store import Store
-from whatsapp_terminal.tui import InfoScreen, Pairing, WhatsAppUI
+from whatsapp_terminal.tui import DiscreetUI, InfoScreen, Pairing, WhatsAppUI
+
+
+@pytest.fixture(params=[WhatsAppUI, DiscreetUI])
+def interface(request):
+    return request.param
 
 
 def demo_store():
@@ -16,8 +22,8 @@ def demo_store():
     return store
 
 
-def test_pointer_changes_and_bells_emit_nothing():
-    app = WhatsAppUI(demo_store())
+def test_pointer_changes_and_bells_emit_nothing(interface):
+    app = interface(demo_store())
     writes = []
     app._driver = SimpleNamespace(write=writes.append)
     for shape in ("default", "pointer", "text", "wait", "grabbing"):
@@ -26,9 +32,9 @@ def test_pointer_changes_and_bells_emit_nothing():
     assert writes == []
 
 
-def test_hover_stays_silent_and_buttons_still_work(monkeypatch):
+def test_hover_stays_silent_and_buttons_still_work(monkeypatch, interface):
     async def scenario():
-        app = WhatsAppUI(demo_store())
+        app = interface(demo_store())
         async with app.run_test() as pilot:
             writes = []
             monkeypatch.setattr(app._driver, "write", writes.append)
@@ -43,10 +49,10 @@ def test_hover_stays_silent_and_buttons_still_work(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_search_favorite_send_and_back():
+def test_search_favorite_send_and_back(interface):
     async def scenario():
         store = demo_store()
-        app = WhatsAppUI(store)
+        app = interface(store)
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             assert app.query_one("#messages").size.height >= 8
@@ -82,7 +88,7 @@ def test_search_favorite_send_and_back():
     asyncio.run(scenario())
 
 
-def test_failed_send_keeps_draft_and_recipient():
+def test_failed_send_keeps_draft_and_recipient(interface):
     class Backend:
         ready = threading.Event()
         connection_error = None
@@ -92,7 +98,7 @@ def test_failed_send_keeps_draft_and_recipient():
 
     async def scenario():
         store = demo_store()
-        app = WhatsAppUI(store)
+        app = interface(store)
         async with app.run_test() as pilot:
             app.terminal.backend = Backend()
             app.select_chat("123@lid")
@@ -109,9 +115,9 @@ def test_failed_send_keeps_draft_and_recipient():
     asyncio.run(scenario())
 
 
-def test_pairing_screen_and_background_notice():
+def test_pairing_screen_and_background_notice(interface):
     async def scenario():
-        app = WhatsAppUI(demo_store())
+        app = interface(demo_store())
         async with app.run_test(size=(100, 40)) as pilot:
             app.post_message(Pairing(b"offline-test-qr"))
             await pilot.pause()
@@ -123,11 +129,11 @@ def test_pairing_screen_and_background_notice():
     asyncio.run(scenario())
 
 
-def test_group_filter_opens_group_by_name():
+def test_group_filter_opens_group_by_name(interface):
     async def scenario():
         store = demo_store()
         store.chat("12345@g.us", "Weekend plans")
-        app = WhatsAppUI(store)
+        app = interface(store)
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.click("#groups")
             assert app.rows == [("12345@g.us", "Weekend plans")]
@@ -139,10 +145,10 @@ def test_group_filter_opens_group_by_name():
     asyncio.run(scenario())
 
 
-def test_arrow_navigation_from_search_and_composer_preserves_drafts():
+def test_arrow_navigation_from_search_and_composer_preserves_drafts(interface):
     async def scenario():
         store = demo_store()
-        app = WhatsAppUI(store)
+        app = interface(store)
         async with app.run_test() as pilot:
             await pilot.click("#all")
             await pilot.press("ctrl+f", "down")
@@ -160,3 +166,53 @@ def test_arrow_navigation_from_search_and_composer_preserves_drafts():
         assert not app.is_running
 
     asyncio.run(scenario())
+
+
+def test_discreet_is_compact_monochrome_and_keeps_receipts():
+    async def scenario():
+        store = demo_store()
+        store.add("123@lid", "sent", "You", "Hello ❤️", 200, True)
+        app = DiscreetUI(store, show_emoji=True)
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.select_chat("123@lid")
+            store.record_receipt("123@lid", ["sent"], "read", 300)
+            app.refresh_view()
+            await pilot.pause()
+            assert not app.query_one("#brand").display
+            assert app.query_one("#composer").size.height == 1
+            assert app.query_one("#messages").size.height >= 16
+            log = app.query_one("#messages", RichLog)
+            rendered = "\n".join(line.text for line in log.lines)
+            assert "You> Hello :red_heart: [read]" in rendered
+            assert "❤️" not in rendered
+            for selector in ("#messages", "#people", "#composer", "#favorite"):
+                color = app.query_one(selector).styles.background
+                assert color.r == color.g == color.b
+            await pilot.press("f1")
+            color = app.screen.query_one("#dialog").styles.background
+            assert color.r == color.g == color.b
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("flag", ["--discreet", "--discrete", "--tui"])
+def test_cli_selects_requested_tui(monkeypatch, flag):
+    import sys
+    from whatsapp_terminal import cli
+
+    launched = []
+    monkeypatch.setattr(sys, "argv", ["wat", "--demo", flag])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(WhatsAppUI, "run", lambda self: launched.append(type(self)))
+    cli.main()
+    assert launched == [WhatsAppUI if flag == "--tui" else DiscreetUI]
+
+
+def test_cli_rejects_conflicting_modes(monkeypatch):
+    import sys
+    from whatsapp_terminal import cli
+
+    monkeypatch.setattr(sys, "argv", ["wat", "--plain", "--discreet"])
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 2

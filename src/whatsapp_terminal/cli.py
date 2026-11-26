@@ -244,6 +244,12 @@ def _main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tui", action="store_true", help="Use the full-screen interface (default)")
     modes.add_argument("--plain", action="store_true", help="Use the original line-based interface")
+    modes.add_argument(
+        "--discreet",
+        "--discrete",
+        action="store_true",
+        help="Use a compact monochrome terminal-style TUI",
+    )
     parser.add_argument(
         "--emoji", action="store_true", help="Show emoji glyphs in the full-screen interface"
     )
@@ -303,9 +309,10 @@ def _main():
         except (ImportError, OSError) as error:
             parser.exit(1, backend_error(error))
     if not args.plain:
-        from .tui import WhatsAppUI
+        from .tui import DiscreetUI, WhatsAppUI
 
-        app = WhatsAppUI(store, backend, show_emoji=args.emoji)
+        interface = DiscreetUI if args.discreet else WhatsAppUI
+        app = interface(store, backend, show_emoji=args.emoji)
         sink["emit"] = app.report
         try:
             app.run()
