@@ -3,22 +3,6 @@ import threading
 import time
 
 
-def mute_patch(chat, until):
-    from neonize.proto.Neonize_pb2 import MutationInfo, PatchInfo
-    from neonize.proto.waSyncAction.WAWebProtobufSyncAction_pb2 import MuteAction, SyncActionValue
-
-    action = MuteAction(muted=until != 0)
-    if until != 0:
-        action.muteEndTimestamp = -1 if until == -1 else until * 1000
-    return PatchInfo(
-        Timestamp=time.time_ns(),
-        Type=PatchInfo.REGULAR_HIGH,
-        Mutations=[
-            MutationInfo(Index=["mute", chat], Version=2, Value=SyncActionValue(muteAction=action))
-        ],
-    )
-
-
 class TemporaryMute:
     def __init__(self, backend, recovery_path=None):
         self.backend = backend
@@ -59,26 +43,14 @@ class TemporaryMute:
         self.selected = chat
 
     def settings(self, chat):
-        from .backend import chat_jid
-
         if not self.backend.ready.is_set():
             raise RuntimeError("Not connected; unmute on your phone or reconnect this app.")
-        self.backend.client.fetch_app_state("regular_high", False)
-        settings = self.backend.client.chat_settings.get_chat_settings(chat_jid(chat))
+        settings = self.backend.mute_settings(chat)
         self.known = {**self.known, chat: settings.MutedUntil}
         return settings
 
     def refresh_known(self):
-        from .backend import chat_jid
-
-        known = {}
-        for chat in self.backend.store.names():
-            try:
-                settings = self.backend.client.chat_settings.get_chat_settings(chat_jid(chat))
-                known[chat] = settings.MutedUntil
-            except Exception:
-                continue
-        self.known = {**self.known, **known}
+        self.known = {**self.known, **self.backend.known_mutes()}
 
     def is_muted(self, chat):
         until = self.known.get(chat, 0)
@@ -109,7 +81,7 @@ class TemporaryMute:
             until = -1
             self.owned.add(chat)
             self.save_recovery()
-            self.backend.client.send_app_state(mute_patch(chat, until))
+            self.backend.set_mute(chat, until)
             self.known = {**self.known, chat: -1}
             self.backend.output(
                 "Mute requested until app exit (shared with your phone, no timeout). "
@@ -131,7 +103,7 @@ class TemporaryMute:
         try:
             current = self.settings(chat)
             if current.MutedUntil == -1 or current.MutedUntil >= 253402300799:
-                self.backend.client.send_app_state(mute_patch(chat, 0))
+                self.backend.set_mute(chat, 0)
                 self.known = {**self.known, chat: 0}
                 self.backend.output(
                     "Temporary mute removed; phone notifications restored when synced."

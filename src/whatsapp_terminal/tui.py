@@ -1,5 +1,4 @@
 from io import StringIO
-import logging
 
 from rich.text import Text
 from textual import on, work
@@ -33,15 +32,6 @@ class Pairing(Message):
     def __init__(self, code):
         super().__init__()
         self.code = code
-
-
-class UILogHandler(logging.Handler):
-    def __init__(self, report):
-        super().__init__(logging.WARNING)
-        self.report = report
-
-    def emit(self, record):
-        self.report(f"{record.levelname}: {record.getMessage()}")
 
 
 class InfoScreen(ModalScreen):
@@ -124,7 +114,6 @@ class WhatsAppUI(App):
         self.busy = False
         self.drafts = {}
         self.history_limit = 200
-        self.loggers = []
 
     def display(self, value):
         return display_text(value, self.show_emoji)
@@ -176,18 +165,8 @@ class WhatsAppUI(App):
         self.set_interval(1, self.refresh_view)
         self.query_one("#search", Input).focus()
         if self.backend:
-            for name in ("neonize", "whatsmeow", "Whatsmeow"):
-                logger = logging.getLogger(name)
-                self.loggers.append((logger, logger.handlers[:], logger.propagate))
-                logger.handlers = [UILogHandler(self.report)]
-                logger.propagate = False
-            self.backend.client.event.qr(lambda client, code: self.post_message(Pairing(code)))
+            self.backend.on_qr = lambda code: self.post_message(Pairing(code))
             self.backend.start()
-
-    def on_unmount(self):
-        for logger, handlers, propagate in self.loggers:
-            logger.handlers = handlers
-            logger.propagate = propagate
 
     def report(self, text):
         self.post_message(Notice(self.display(text)))

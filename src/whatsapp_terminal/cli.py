@@ -238,6 +238,9 @@ def main():
 def _main():
     parser = argparse.ArgumentParser(description="Lightweight WhatsApp terminal client")
     parser.add_argument("--demo", action="store_true", help="Try offline without an account")
+    parser.add_argument(
+        "--setup-backend", action="store_true", help="Install the pinned Baileys helper using npm"
+    )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tui", action="store_true", help="Use the full-screen interface (default)")
     modes.add_argument("--plain", action="store_true", help="Use the original line-based interface")
@@ -246,6 +249,14 @@ def _main():
     )
     parser.add_argument("--data-dir", type=Path, default=user_data_path("whatsapp-terminal"))
     args = parser.parse_args()
+    if args.setup_backend:
+        from .transport import setup_backend
+
+        try:
+            setup_backend()
+        except (OSError, RuntimeError) as error:
+            parser.exit(1, f"Backend setup failed: {error}\n")
+        return
     if not sys.stdin.isatty():
         parser.error("An interactive terminal is required.")
     os.umask(0o077)

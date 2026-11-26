@@ -1,39 +1,30 @@
 import asyncio
 import sys
 import threading
-from importlib import import_module
-from importlib.metadata import distribution
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
-from whatsapp_terminal.muting import TemporaryMute, mute_patch
+from whatsapp_terminal.muting import TemporaryMute
 
 
 @pytest.fixture
 def muting(monkeypatch):
-    package = ModuleType("neonize")
-    package.__path__ = [str(distribution("neonize").locate_file("neonize"))]
-    monkeypatch.setitem(sys.modules, "neonize", package)
-    import_module("neonize.proto.Neonize_pb2")
     monkeypatch.setattr("whatsapp_terminal.muting.time.time", lambda: 1000)
     settings = SimpleNamespace(MutedUntil=0, Found=True)
     patches, notices = [], []
 
-    def send(patch):
-        patch.SerializeToString()
-        patches.append(patch)
-        action = patch.Mutations[0].Value.muteAction
-        settings.MutedUntil = 253402300799 if action.muted else 0
+    def send(chat, until):
+        patches.append((chat, until))
+        settings.MutedUntil = -1 if until else 0
 
     backend = SimpleNamespace(
         ready=threading.Event(),
         output=notices.append,
-        client=SimpleNamespace(
-            fetch_app_state=lambda *args: None,
-            send_app_state=send,
-            chat_settings=SimpleNamespace(get_chat_settings=lambda jid: settings),
-        ),
+        client=SimpleNamespace(),
+        mute_settings=lambda chat: settings,
+        set_mute=send,
+        known_mutes=lambda: {},
     )
     backend.ready.set()
     manager = TemporaryMute(backend)
@@ -45,16 +36,10 @@ def test_patch_and_restore(muting):
     manager, settings, patches, notices = muting
     manager.enable("123@lid")
     assert manager.enabled("123@lid")
-    patch = patches[0]
-    assert patch.IsInitialized()
-    assert patch.Type == patch.REGULAR_HIGH
-    assert list(patch.Mutations[0].Index) == ["mute", "123@lid"]
-    assert patch.Mutations[0].Version == 2
-    assert patch.Mutations[0].Value.muteAction.muted
-    assert patch.Mutations[0].Value.muteAction.muteEndTimestamp == -1
-    assert settings.MutedUntil == 253402300799
+    assert patches[0] == ("123@lid", -1)
+    assert settings.MutedUntil == -1
     manager.release(force=True)
-    assert not patches[-1].Mutations[0].Value.muteAction.muted
+    assert patches[-1] == ("123@lid", 0)
     assert not manager.owned
 
 
@@ -114,20 +99,21 @@ def test_invalid_or_disconnected_chat_never_sends(muting):
 def test_failed_send_does_not_claim_success(muting):
     manager, settings, patches, notices = muting
 
-    def fail(patch):
+    def fail(chat, until):
         raise RuntimeError("Network error")
 
-    manager.backend.client.send_app_state = fail
+    manager.backend.set_mute = fail
     with pytest.raises(RuntimeError):
         manager.enable("123@lid")
     assert not notices
     assert manager.owned
 
 
-def test_unmute_patch_has_no_expiry(muting):
-    patch = mute_patch("123@lid", 0)
-    assert patch.IsInitialized()
-    assert not patch.Mutations[0].Value.muteAction.HasField("muteEndTimestamp")
+def test_unmute_uses_zero(muting):
+    manager, settings, patches, notices = muting
+    manager.enable("123@lid")
+    manager.release(force=True)
+    assert patches[-1] == ("123@lid", 0)
 
 
 @pytest.mark.parametrize("answer, expected", [("", 0), ("n", 0), ("y", 1)])
@@ -258,18 +244,17 @@ def test_multiple_mutes_persist_and_cleanup_continues_after_failure(muting, tmp_
     states = {"123@lid": 0, "456@lid": 0, "789@lid": 5000}
     failed = set()
 
-    def get_settings(jid):
-        return SimpleNamespace(MutedUntil=states[f"{jid.User}@{jid.Server}"])
+    def get_settings(chat):
+        return SimpleNamespace(MutedUntil=states[chat])
 
-    def send(patch):
-        chat = patch.Mutations[0].Index[1]
+    def send(chat, until):
         if chat in failed:
             raise RuntimeError("Network error")
-        patches.append(patch)
-        states[chat] = 253402300799 if patch.Mutations[0].Value.muteAction.muted else 0
+        patches.append((chat, until))
+        states[chat] = -1 if until else 0
 
-    manager.backend.client.chat_settings.get_chat_settings = get_settings
-    manager.backend.client.send_app_state = send
+    manager.backend.mute_settings = get_settings
+    manager.backend.set_mute = send
     path = tmp_path / "mute-recovery.json"
     manager.recovery_path = path
     for chat in states:

@@ -3,7 +3,7 @@ name = "whatsapp-terminal"
 version = "0.1.0"
 description = "A lightweight WhatsApp terminal client"
 requires-python = ">=3.11"
-dependencies = ["neonize>=0.12.4,<0.13", "prompt-toolkit>=3.0.50,<4", "platformdirs>=4,<5", "textual>=8.2.8,<9", "emoji>=2.14,<3"]
+dependencies = ["prompt-toolkit>=3.0.50,<4", "platformdirs>=4,<5", "textual>=8.2.8,<9", "emoji>=2.14,<3", "segno>=1.6,<2"]
 
 [project.scripts]
 wat = "whatsapp_terminal.cli:main"
